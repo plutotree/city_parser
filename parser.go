@@ -1,9 +1,15 @@
 package cityparser
 
 import (
+	"errors"
 	"regexp"
 	"sort"
 	"strings"
+)
+
+var (
+	ErrEmptyInput = errors.New("empty input text")
+	ErrNoMatch    = errors.New("no matching location found")
 )
 
 // CityParser 中国城市代码解析器
@@ -28,18 +34,20 @@ func NewCityParser() *CityParser {
 // 参数:
 //   - locationText: 待解析的地址文本
 //
-// 返回 nil 表示无法解析出有效地址
-func (p *CityParser) Parse(locationText string) *CityResult {
+// 返回错误:
+//   - ErrEmptyInput: 输入为空
+//   - ErrNoMatch: 无法解析出有效地址
+func (p *CityParser) Parse(locationText string) (*CityResult, error) {
 	locationText = strings.TrimSpace(locationText)
 	if locationText == "" {
-		return nil
+		return nil, ErrEmptyInput
 	}
 
 	// Step 1: 获取候选
 	candidateIdxList := p.getCandidates(locationText)
 
 	if len(candidateIdxList) == 0 {
-		return nil
+		return nil, ErrNoMatch
 	}
 
 	// Step 2: 多轮筛选
@@ -74,7 +82,7 @@ func (p *CityParser) Parse(locationText string) *CityResult {
 	candidateIdxList = filtered
 
 	if len(candidateIdxList) == 0 {
-		return nil
+		return nil, ErrNoMatch
 	}
 
 	// 2.1 找出匹配数量最多的
@@ -94,7 +102,7 @@ func (p *CityParser) Parse(locationText string) *CityResult {
 
 	// 仅一个候选，直接返回
 	if len(candidateIdxList) == 1 {
-		return p.buildResult(&p.adminMapList[candidateIdxList[0]])
+		return p.buildResult(&p.adminMapList[candidateIdxList[0]]), nil
 	}
 
 	// 2.2 找出匹配位置最靠前的
@@ -121,7 +129,7 @@ func (p *CityParser) Parse(locationText string) *CityResult {
 	candidateIdxList = newCandidates
 
 	if len(candidateIdxList) == 0 {
-		return nil
+		return nil, ErrNoMatch
 	}
 
 	minOffset := offsetSum(&p.adminMapList[candidateIdxList[0]])
@@ -186,11 +194,11 @@ func (p *CityParser) Parse(locationText string) *CityResult {
 	}
 
 	if len(candidateIdxList) == 0 {
-		return nil
+		return nil, ErrNoMatch
 	}
 
 	// 取第一个作为最终结果
-	return p.buildResult(&p.adminMapList[candidateIdxList[0]])
+	return p.buildResult(&p.adminMapList[candidateIdxList[0]]), nil
 }
 
 // processExceptionAlias 处理异常别名（如 "太原路" 中的 "太原" 不应匹配）

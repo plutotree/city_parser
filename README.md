@@ -63,15 +63,19 @@ func main() {
 
 ### `NewCityParser() *CityParser`
 
-创建解析器实例。首次调用 `Parse` 时自动加载词典。
+创建解析器实例，初始化时即加载全部词典数据。
 
-### `Parse(text string) *CityResult`
+### `Parse(text string) (*CityResult, error)`
 
-解析地址文本，返回结构化结果。返回 `nil` 表示无法解析出有效地址。
+解析地址文本，返回结构化结果。
 
 | 参数 | 类型 | 说明 |
 |---|---|---|
 | `text` | `string` | 待解析的地址文本 |
+
+可能返回的错误：
+- `ErrEmptyInput`：输入为空
+- `ErrNoMatch`：无法解析出有效地址
 
 ### `CityResult` 返回结构
 

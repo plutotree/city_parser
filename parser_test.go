@@ -2,6 +2,7 @@ package cityparser
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 )
@@ -36,9 +37,9 @@ func TestBasicParse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := p.Parse(tt.input)
-			if result == nil {
-				t.Fatalf("Parse(%q) returned nil", tt.input)
+			result, err := p.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
 			}
 			if result.Code != tt.wantCode {
 				t.Errorf("Code = %q, want %q", result.Code, tt.wantCode)
@@ -80,9 +81,9 @@ func TestMunicipalities(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			result := p.Parse(tt.input)
-			if result == nil {
-				t.Fatalf("Parse(%q) returned nil", tt.input)
+			result, err := p.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
 			}
 			if result.Code != tt.wantCode {
 				t.Errorf("Code = %q, want %q", result.Code, tt.wantCode)
@@ -116,9 +117,9 @@ func TestAliasDisambiguation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
-			result := p.Parse(tt.input)
-			if result == nil {
-				t.Fatalf("Parse(%q) returned nil", tt.input)
+			result, err := p.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
 			}
 			if result.City != tt.wantCity {
 				t.Errorf("City = %q, want %q", result.City, tt.wantCity)
@@ -130,9 +131,9 @@ func TestAliasDisambiguation(t *testing.T) {
 func TestFreeText(t *testing.T) {
 	p := NewCityParser()
 
-	result := p.Parse("我住在深圳市南山区")
-	if result == nil {
-		t.Fatal("Parse returned nil")
+	result, err := p.Parse("我住在深圳市南山区")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
 	}
 	if result.Code != "440305" {
 		t.Errorf("Code = %q, want %q", result.Code, "440305")
@@ -148,19 +149,31 @@ func TestFreeText(t *testing.T) {
 func TestEmptyInput(t *testing.T) {
 	p := NewCityParser()
 
-	if result := p.Parse(""); result != nil {
-		t.Errorf("Parse(\"\") = %+v, want nil", result)
+	_, err := p.Parse("")
+	if !errors.Is(err, ErrEmptyInput) {
+		t.Errorf("Parse(\"\") error = %v, want ErrEmptyInput", err)
 	}
-	if result := p.Parse("   "); result != nil {
-		t.Errorf("Parse(\"   \") = %+v, want nil", result)
+
+	_, err = p.Parse("   ")
+	if !errors.Is(err, ErrEmptyInput) {
+		t.Errorf("Parse(\"   \") error = %v, want ErrEmptyInput", err)
+	}
+}
+
+func TestNoMatch(t *testing.T) {
+	p := NewCityParser()
+
+	_, err := p.Parse("hello world")
+	if !errors.Is(err, ErrNoMatch) {
+		t.Errorf("Parse(\"hello world\") error = %v, want ErrNoMatch", err)
 	}
 }
 
 func TestJSONOutput(t *testing.T) {
 	p := NewCityParser()
-	result := p.Parse("广东省深圳市南山区科技园")
-	if result == nil {
-		t.Fatal("Parse returned nil")
+	result, err := p.Parse("广东省深圳市南山区科技园")
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
 	}
 
 	jsonBytes, err := json.MarshalIndent(result, "", "  ")
