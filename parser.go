@@ -70,9 +70,39 @@ func (p *CityParser) Parse(locationText string) (*CityResult, error) {
 					sameOffsetInfos = append(sameOffsetInfos, o)
 				}
 			}
-			if len(sameOffsetInfos) == 2 &&
-				sameOffsetInfos[0].AliasIdx == 0 && sameOffsetInfos[1].AliasIdx == 1 {
-				continue
+			// 同一 offset 上多个层级命中时，需要识别两类"子串噪音"，将整条 item 剔除：
+			//
+			//  类型 A：一个 FullName + 一个 Alias 同位置
+			//    例："朝阳市"输入对 item=朝阳市/朝阳县，
+			//        City.FullName="朝阳市" pos=0 与 County.Alias="朝阳" pos=0 同位置——
+			//        County 的"朝阳"是"朝阳市"的前缀子串，不该被算作真实命中。
+			//
+			//  类型 B：多个 Alias 同位置（≥2）
+			//    例："沈阳市朝阳区"对 item=辽宁/朝阳市/朝阳县，
+			//        City.Alias 与 County.Alias 都用同一段"朝阳"命中——同一段文本被多层级
+			//        "借用"实际是误匹配。
+			//
+			// 例外：直辖市 Province 与 City 名字本就相同（"北京"/"上海"等），必然以同形式
+			// 在同位置命中，不能误杀。
+			if !municipalitiesCities[item.Province.Alias] {
+				// 类型 A
+				if len(sameOffsetInfos) == 2 &&
+					sameOffsetInfos[0].AliasIdx == 0 && sameOffsetInfos[1].AliasIdx == 1 {
+					continue
+				}
+				// 类型 B：≥2 个且全是 Alias
+				if len(sameOffsetInfos) >= 2 {
+					allAlias := true
+					for _, o := range sameOffsetInfos {
+						if o.AliasIdx == 0 {
+							allAlias = false
+							break
+						}
+					}
+					if allAlias {
+						continue
+					}
+				}
 			}
 			filtered = append(filtered, idx)
 		} else {

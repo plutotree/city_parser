@@ -284,6 +284,61 @@ func TestNoPhantomCounty(t *testing.T) {
 }
 
 // TestStableOutput 验证同一个 parser 重复调用同一输入，结果稳定（无内部状态污染）。
+// TestSubstringNoiseFilter 验证 step 2.0 的"子串噪音"过滤覆盖两类场景：
+//
+//  类型 A：一 FullName + 一 Alias 同位置——例如 item=辽宁/朝阳市/朝阳县
+//          被"朝阳市"输入误拉入（County.Alias="朝阳" 是 City.FullName="朝阳市"
+//          的前缀子串）。这种 item 整条剔除后，结果应是 朝阳市 (211300)。
+//
+//  类型 B：≥2 个全 Alias 同位置——例如 item=辽宁/朝阳市/朝阳县 被
+//          "沈阳市朝阳区某地"误拉入（City 与 County 都用 Alias="朝阳" 同位置命中）。
+//          这种 item 整条剔除后，结果应是 沈阳市 (210100)。
+//
+// 直辖市（Province=City 同名）必然同位置命中，作为例外不参与过滤。
+func TestSubstringNoiseFilter(t *testing.T) {
+	p := NewCityParser()
+
+	tests := []struct {
+		input        string
+		wantCode     string
+		wantProvince string
+		wantCity     string
+		wantCounty   string
+		desc         string
+	}{
+		// 类型 A：朝阳市单独 — 不应误命中朝阳县
+		{"朝阳市", "211300", "辽宁省", "朝阳市", "", "类型A: 朝阳市 不应被朝阳县 item 吸引"},
+		// 类型 B：沈阳市朝阳区某地 — 不应误命中朝阳市朝阳县
+		{"沈阳市朝阳区某地", "210100", "辽宁省", "沈阳市", "", "类型B: 沈阳市 全名命中应胜过朝阳的 alias 噪音"},
+		{"沈阳市朝阳", "210100", "辽宁省", "沈阳市", "", "类型B: 同上但末尾无'区'"},
+		{"沈阳朝阳区", "210100", "辽宁省", "沈阳市", "", "类型B: 沈阳作 alias 也应胜出"},
+		// 反向 case：用户确实写了朝阳县全名，应正常命中
+		{"朝阳县", "211321", "辽宁省", "朝阳市", "朝阳县", "朝阳县全名输入应正常命中区县级"},
+		{"辽宁省朝阳市朝阳县", "211321", "辽宁省", "朝阳市", "朝阳县", "完整地址不受过滤影响"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			r, err := p.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			if r.Code != tt.wantCode {
+				t.Errorf("Code = %q, want %q", r.Code, tt.wantCode)
+			}
+			if r.Province != tt.wantProvince {
+				t.Errorf("Province = %q, want %q", r.Province, tt.wantProvince)
+			}
+			if r.City != tt.wantCity {
+				t.Errorf("City = %q, want %q", r.City, tt.wantCity)
+			}
+			if r.County != tt.wantCounty {
+				t.Errorf("County = %q, want %q", r.County, tt.wantCounty)
+			}
+		})
+	}
+}
+
 func TestStableOutput(t *testing.T) {
 	p := NewCityParser()
 
