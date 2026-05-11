@@ -234,6 +234,101 @@ func TestRemainder(t *testing.T) {
 	}
 }
 
+// TestNoPhantomCounty 验证 buildResult 不会把没在文本里出现的 County 填入结果。
+//
+// 历史 bug：当输入只有省/市级关键词、加上一些与某区县级 item 同省的非地名词
+// （如"上海江宁青少年体育俱乐部"），筛选可能选中某个区县级 item，但其 County
+// 在原文中根本没出现。旧实现按 Code 层级直接填 County.FullName，造成"幻觉"。
+//
+// 修复后：必须按 Offsets[i].Pos > -1 实际命中层级填字段，Code 同步回退。
+func TestNoPhantomCounty(t *testing.T) {
+	p := NewCityParser()
+
+	tests := []struct {
+		input        string
+		wantCode     string
+		wantProvince string
+		wantCity     string
+		wantCounty   string
+	}{
+		// "江宁" 是江苏南京下辖区名，但因为有"上海"前置且文本是俱乐部名，
+		// 不应吸引到任何上海的具体 county
+		{"上海江宁青少年体育俱乐部", "310000", "上海市", "上海市", ""},
+		// "浦东" 在上海是 County.Alias，但文本里没"浦东新区"全名，
+		// "浦东" 也未必命中（取决于筛选）；不论如何 County 不应填错的值
+		{"上海浦东弈步体育俱乐部", "310000", "上海市", "上海市", ""},
+		// 同样：俱乐部名里有"奉贤"两字也不该乱命中
+		{"上海某某俱乐部", "310000", "上海市", "上海市", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			r, err := p.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			if r.Code != tt.wantCode {
+				t.Errorf("Code = %q, want %q", r.Code, tt.wantCode)
+			}
+			if r.Province != tt.wantProvince {
+				t.Errorf("Province = %q, want %q", r.Province, tt.wantProvince)
+			}
+			if r.City != tt.wantCity {
+				t.Errorf("City = %q, want %q", r.City, tt.wantCity)
+			}
+			if r.County != tt.wantCounty {
+				t.Errorf("County = %q, want %q", r.County, tt.wantCounty)
+			}
+		})
+	}
+}
+
+// TestStableOutput 验证同一个 parser 重复调用同一输入，结果稳定（无内部状态污染）。
+func TestStableOutput(t *testing.T) {
+	p := NewCityParser()
+
+	inputs := []string{
+		"上海江宁青少年体育俱乐部",
+		"广东省深圳市南山区科技园",
+		"沈阳市星海国际象棋俱乐部",
+		"重庆市渝中区",
+	}
+	// 跑第一遍记录结果
+	first := make(map[string]string)
+	for _, in := range inputs {
+		r, err := p.Parse(in)
+		if err != nil {
+			t.Fatalf("Parse(%q) error: %v", in, err)
+		}
+		first[in] = fmt.Sprintf("code=%s prov=%s city=%s county=%s remainder=%s",
+			r.Code, r.Province, r.City, r.County, r.Remainder)
+	}
+
+	// 多跑几遍，结果必须完全一致
+	for round := 0; round < 5; round++ {
+		// 故意打散顺序穿插一些其它输入
+		for _, in := range []string{
+			"广州市天河区",
+			"沈阳市朝阳区某地",
+			"上海市浦东新区",
+		} {
+			_, _ = p.Parse(in)
+		}
+		for _, in := range inputs {
+			r, err := p.Parse(in)
+			if err != nil {
+				t.Fatalf("round %d Parse(%q) error: %v", round, in, err)
+			}
+			got := fmt.Sprintf("code=%s prov=%s city=%s county=%s remainder=%s",
+				r.Code, r.Province, r.City, r.County, r.Remainder)
+			if got != first[in] {
+				t.Errorf("round %d Parse(%q) unstable:\n  first: %s\n  now:   %s",
+					round, in, first[in], got)
+			}
+		}
+	}
+}
+
 func BenchmarkParse(b *testing.B) {
 	p := NewCityParser()
 	// 预热

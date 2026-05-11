@@ -298,26 +298,46 @@ func (p *CityParser) getCandidates(locationText string) []int {
 	return candidateIdxList
 }
 
-// buildResult 根据最终匹配的 AdminItem 构建 CityResult
+// buildResult 根据最终匹配的 AdminItem 构建 CityResult。
+//
+// 关键约束：返回的 Province / City / County 必须**确实在原文里出现过**
+// （Offsets[i].Pos > -1）。否则会出现"输入只含上海，但被某个区县级 item 命中
+// 后误填某个具体的 County"这类幻觉式结果（v0.3.0 及更早版本的 bug）。
+//
+// 因此 Code 也按真正命中的最深层级回退：
+//   - County 命中 → 返回区县级代码 (item.Code)
+//   - 仅 City 命中 → 截断到市级 (XXXX00)
+//   - 仅 Province 命中 → 截断到省级 (XX0000)
 func (p *CityParser) buildResult(item *AdminItem, inputText string) *CityResult {
 	result := &CityResult{}
 
-	code := item.Code
+	provHit := item.Offsets[0].Pos > -1
+	cityHit := item.Offsets[1].Pos > -1
+	countyHit := item.Offsets[2].Pos > -1
 
-	// 根据 code 判断匹配级别并填充结果
+	// 由 item.Code 推导各层级 code（不依赖 item 当前层级）
+	code := item.Code
+	provCode := code[:2] + "0000"
+	cityCodeStr := code[:4] + "00"
+
 	switch {
-	case code[2:] == "0000": // 匹配到省级
-		result.Province = item.Province.FullName
+	case countyHit:
 		result.Code = code
-	case code[4:] == "00": // 匹配到市级
-		result.Province = item.Province.FullName
-		result.City = item.City.FullName
-		result.Code = code
-	default: // 匹配到区/县级
 		result.Province = item.Province.FullName
 		result.City = item.City.FullName
 		result.County = item.County.FullName
-		result.Code = code
+	case cityHit:
+		result.Code = cityCodeStr
+		result.Province = item.Province.FullName
+		result.City = item.City.FullName
+	case provHit:
+		result.Code = provCode
+		result.Province = item.Province.FullName
+	default:
+		// 理论上 candidate 至少命中一层，否则不会进 candidate 列表；
+		// 兜底返回省级，避免空 Code。
+		result.Code = provCode
+		result.Province = item.Province.FullName
 	}
 
 	// 直辖市处理：省=市的情况下，city 填省名
