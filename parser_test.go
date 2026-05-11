@@ -184,6 +184,43 @@ func TestJSONOutput(t *testing.T) {
 	fmt.Println(string(jsonBytes))
 }
 
+func TestRemainder(t *testing.T) {
+	p := NewCityParser()
+
+	tests := []struct {
+		input       string
+		wantCode    string
+		wantRemain  string
+	}{
+		// 去除区县级后的剩余文本
+		{"广东省深圳市南山区科技园", "440305", "科技园"},
+		{"深圳南山区科技园路100号", "440305", "科技园路100号"},
+		{"成都武侯区天府大道", "510107", "天府大道"},
+
+		// 仅市级匹配时，去除市后的剩余文本
+		{"深圳市科技园", "440300", "科技园"},
+		{"成都市高新区", "510100", "高新区"},
+
+		// 仅省级匹配时
+		{"广东省某个地方", "440000", "某个地方"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result, err := p.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			if result.Code != tt.wantCode {
+				t.Errorf("Code = %q, want %q", result.Code, tt.wantCode)
+			}
+			if result.Remainder != tt.wantRemain {
+				t.Errorf("Remainder = %q, want %q", result.Remainder, tt.wantRemain)
+			}
+		})
+	}
+}
+
 func BenchmarkParse(b *testing.B) {
 	p := NewCityParser()
 	// 预热

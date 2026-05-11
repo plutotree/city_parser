@@ -102,7 +102,7 @@ func (p *CityParser) Parse(locationText string) (*CityResult, error) {
 
 	// 仅一个候选，直接返回
 	if len(candidateIdxList) == 1 {
-		return p.buildResult(&p.adminMapList[candidateIdxList[0]]), nil
+		return p.buildResult(&p.adminMapList[candidateIdxList[0]], locationText), nil
 	}
 
 	// 2.2 找出匹配位置最靠前的
@@ -198,7 +198,7 @@ func (p *CityParser) Parse(locationText string) (*CityResult, error) {
 	}
 
 	// 取第一个作为最终结果
-	return p.buildResult(&p.adminMapList[candidateIdxList[0]]), nil
+	return p.buildResult(&p.adminMapList[candidateIdxList[0]], locationText), nil
 }
 
 // processExceptionAlias 处理异常别名（如 "太原路" 中的 "太原" 不应匹配）
@@ -299,7 +299,7 @@ func (p *CityParser) getCandidates(locationText string) []int {
 }
 
 // buildResult 根据最终匹配的 AdminItem 构建 CityResult
-func (p *CityParser) buildResult(item *AdminItem) *CityResult {
+func (p *CityParser) buildResult(item *AdminItem, inputText string) *CityResult {
 	result := &CityResult{}
 
 	code := item.Code
@@ -337,7 +337,60 @@ func (p *CityParser) buildResult(item *AdminItem) *CityResult {
 		result.Code = provinceCode(result.Code)
 	}
 
+	// 计算 Remainder：去除省/市/区县后的剩余文本
+	result.Remainder = computeRemainder(item, inputText)
+
 	return result
+}
+
+// computeRemainder 计算去除行政区划后的剩余文本
+func computeRemainder(item *AdminItem, inputText string) string {
+	if inputText == "" {
+		return ""
+	}
+
+	textRunes := []rune(inputText)
+
+	// 找到最后匹配的位置
+	lastPos := -1
+	var lastMatchedName string
+
+	names := [3]NamePair{item.Province, item.City, item.County}
+	for idx, o := range item.Offsets {
+		if o.Pos > -1 {
+			namePair := names[idx]
+			if o.AliasIdx == 0 {
+				lastMatchedName = namePair.FullName
+			} else {
+				lastMatchedName = namePair.Alias
+			}
+			lastPos = o.Pos
+		}
+	}
+
+	if lastPos == -1 {
+		return ""
+	}
+
+	// 计算剩余文本的起始位置
+	remainderStart := lastPos + len([]rune(lastMatchedName))
+
+	if remainderStart >= len(textRunes) {
+		return ""
+	}
+
+	// 截取剩余部分并去除首尾空白
+	remainder := strings.TrimSpace(string(textRunes[remainderStart:]))
+
+	// 进一步去除可能残留的行政区划关键词开头
+	remainder = strings.TrimPrefix(remainder, "市")
+	remainder = strings.TrimPrefix(remainder, "区")
+	remainder = strings.TrimPrefix(remainder, "县")
+	remainder = strings.TrimPrefix(remainder, "镇")
+	remainder = strings.TrimPrefix(remainder, "乡")
+	remainder = strings.TrimSpace(remainder)
+
+	return remainder
 }
 
 // === rune 操作辅助函数 ===

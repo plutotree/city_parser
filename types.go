@@ -10,10 +10,11 @@ package cityparser
 // 注意：supplementary 中的虚拟节点（如直辖市的 500100）不会作为 Code 返回，
 // 会自动回退到上一级真实代码（如 500000）。
 type CityResult struct {
-	Code     string `json:"code"`               // GB/T 2260 代码
-	Province string `json:"province,omitempty"`  // 省
-	City     string `json:"city,omitempty"`      // 市
-	County   string `json:"county,omitempty"`    // 区/县
+	Code      string `json:"code"`               // GB/T 2260 代码
+	Province  string `json:"province,omitempty"`  // 省
+	City      string `json:"city,omitempty"`     // 市
+	County    string `json:"county,omitempty"`   // 区/县
+	Remainder string `json:"remainder,omitempty"` // 去除省/市/区县后的剩余文本
 }
 
 // NamePair 存储地名的全名和别名
