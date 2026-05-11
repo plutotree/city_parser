@@ -343,54 +343,83 @@ func (p *CityParser) buildResult(item *AdminItem, inputText string) *CityResult 
 	return result
 }
 
-// computeRemainder 计算去除行政区划后的剩余文本
+// computeRemainder 计算去除行政区划后的剩余文本。
+//
+// 语义：把命中的省/市/县名（按 Offsets[i].AliasIdx 决定 FullName 还是 Alias）
+// 依次从原文中擦除，返回剩余文本。
+//
+// 与"截取最后匹配位置之后的文本"不同，本实现支持行政名出现在中间的情况，例如：
+//
+//	输入: "星海（沈阳）国际象棋俱乐部" → "星海（）国际象棋俱乐部"
+//	输入: "星海沈阳国际象棋俱乐部"     → "星海国际象棋俱乐部"
+//
+// 擦除规则：
+//  1. 按命中层级（省→市→县）依次处理，按 AliasIdx 选择擦 FullName 还是 Alias，
+//     用 strings.Index 找首次命中位置，仅擦除该一处（避免误擦同名子串）。
+//  2. 每次擦除后，若紧邻的下一个字符是常见行政尾缀（市/区/县/镇/乡/旗）之一，
+//     一并擦除。这是为了覆盖 Alias 命中场景（如命中"沈阳"但原文是"沈阳市..."）
+//     时的尾缀残留，行为与旧版 TrimPrefix 兼容。
+//  3. 直辖市的省名与市名 Alias 相同（如"北京"），可能在 Province 与 City 两个
+//     Offset 上都登记了同一位置，会用相同的 Index 重复擦除——按 strings.Index
+//     的语义，第一次擦掉后再找会找到下一处或返回 -1，结果幂等。
+//  4. 最后做一次 TrimSpace 去除首尾空白，不动其他标点。
 func computeRemainder(item *AdminItem, inputText string) string {
 	if inputText == "" {
 		return ""
 	}
 
-	textRunes := []rune(inputText)
-
-	// 找到最后匹配的位置
-	lastPos := -1
-	var lastMatchedName string
-
 	names := [3]NamePair{item.Province, item.City, item.County}
+
+	// 收集要擦除的名字（按命中时实际使用的形式）。
+	type erase struct {
+		name string
+		pos  int // rune offset，用于按出现位置升序擦除（保持稳定）
+	}
+	var toErase []erase
 	for idx, o := range item.Offsets {
-		if o.Pos > -1 {
-			namePair := names[idx]
-			if o.AliasIdx == 0 {
-				lastMatchedName = namePair.FullName
-			} else {
-				lastMatchedName = namePair.Alias
-			}
-			lastPos = o.Pos
+		if o.Pos < 0 {
+			continue
 		}
+		var name string
+		if o.AliasIdx == 0 {
+			name = names[idx].FullName
+		} else {
+			name = names[idx].Alias
+		}
+		if name == "" {
+			continue
+		}
+		toErase = append(toErase, erase{name: name, pos: o.Pos})
 	}
 
-	if lastPos == -1 {
-		return ""
+	// 按出现位置升序，从前往后擦除。
+	// 这样擦除位置紧邻字符的判断更稳定（不受其他擦除已移除的字符干扰）。
+	sort.Slice(toErase, func(i, j int) bool {
+		return toErase[i].pos < toErase[j].pos
+	})
+
+	result := inputText
+	suffixesToTrim := []string{"市", "区", "县", "镇", "乡", "旗"}
+
+	for _, e := range toErase {
+		idx := strings.Index(result, e.name)
+		if idx < 0 {
+			// 直辖市等场景：Province 与 City 命中同位置同名，第二次擦不到。
+			continue
+		}
+		head := result[:idx]
+		tail := result[idx+len(e.name):]
+		// 紧邻尾缀清理（防御 Alias 命中后残留的尾缀字）
+		for _, suf := range suffixesToTrim {
+			if strings.HasPrefix(tail, suf) {
+				tail = tail[len(suf):]
+				break
+			}
+		}
+		result = head + tail
 	}
 
-	// 计算剩余文本的起始位置
-	remainderStart := lastPos + len([]rune(lastMatchedName))
-
-	if remainderStart >= len(textRunes) {
-		return ""
-	}
-
-	// 截取剩余部分并去除首尾空白
-	remainder := strings.TrimSpace(string(textRunes[remainderStart:]))
-
-	// 进一步去除可能残留的行政区划关键词开头
-	remainder = strings.TrimPrefix(remainder, "市")
-	remainder = strings.TrimPrefix(remainder, "区")
-	remainder = strings.TrimPrefix(remainder, "县")
-	remainder = strings.TrimPrefix(remainder, "镇")
-	remainder = strings.TrimPrefix(remainder, "乡")
-	remainder = strings.TrimSpace(remainder)
-
-	return remainder
+	return strings.TrimSpace(result)
 }
 
 // === rune 操作辅助函数 ===
