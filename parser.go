@@ -313,12 +313,18 @@ func (p *CityParser) getCandidates(locationText string) []int {
 		}
 
 		if count > 0 {
-			// 直辖市处理
-			if municipalitiesCities[item.Province.Alias] {
-				provAliasRunes := []rune(item.Province.Alias)
-				if runeContains(textRunes, provAliasRunes) {
-					count--
-				}
+			// 直辖市处理：Province 与 City 同名（如"北京"/"上海"），如果两者命中同一段
+			// 文本，实际只是"一处"被两个层级"借用"，应当只算 1 次匹配。
+			//
+			// 既要扣 MatchCount，也要把 City 的 Offset 同步清掉——否则下游 step 2.3b
+			// 的 sumAliasIdx 等度量会错把直辖市 item 算成"双层 alias 命中"，
+			// 导致它输给只有 County 单点 alias 命中的远方同字 item（例如"上海宁弈"
+			// 被误识别为浙江海宁市）。
+			if municipalitiesCities[item.Province.Alias] &&
+				item.Offsets[0].Pos >= 0 && item.Offsets[1].Pos >= 0 &&
+				item.Offsets[0].Pos == item.Offsets[1].Pos {
+				count--
+				item.Offsets[1] = OffsetInfo{Pos: -1, AliasIdx: -1}
 			}
 			item.MatchCount = count
 			candidateIdxList = append(candidateIdxList, i)

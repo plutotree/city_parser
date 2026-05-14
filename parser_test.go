@@ -394,3 +394,82 @@ func BenchmarkParse(b *testing.B) {
 		p.Parse("广东省深圳市南山区科技园")
 	}
 }
+
+// TestMunicipalityOffsetSync 直辖市 Province 与 City 在同位置命中时，必须把 City
+// Offset 同步抹掉（同时扣 MatchCount），否则下游 sumAliasIdx 度量会错把直辖市
+// item 算成"双层 alias 命中"，反而输给只命中 County 的远方同字 item。
+//
+// 典型 v0.5.0 误判：
+//
+//	"上海宁弈" → 浙江省/嘉兴市/海宁市
+//	"上海林峰" → 黑龙江省/牡丹江市/海林市
+func TestMunicipalityOffsetSync(t *testing.T) {
+	p := NewCityParser()
+
+	tests := []struct {
+		input    string
+		wantCode string
+	}{
+		// "上海"两字命中直辖市 Province+City 同位置；
+		// "宁弈"中的"宁"不应让浙江/海宁市抢走结果。
+		{"上海宁弈", "310000"},
+		// 同上，"林"不应让黑龙江/海林市抢走。
+		{"上海林峰", "310000"},
+		// 直辖市+区 仍应解析到区县级。
+		{"上海市黄浦区", "310101"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			r, err := p.Parse(tt.input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", tt.input, err)
+			}
+			if r.Code != tt.wantCode {
+				t.Errorf("Parse(%q).Code = %q, want %q (province=%s city=%s county=%s)",
+					tt.input, r.Code, tt.wantCode, r.Province, r.City, r.County)
+			}
+		})
+	}
+}
+
+// TestStableAcrossInstances 同一输入在多个独立 NewCityParser 实例上的解析结果
+// 必须完全一致。
+//
+// 历史背景：v0.5.0 之前 buildAdminMapList 通过 map 遍历构建候选切片，Go 会随机化
+// map 遍历顺序，导致不同进程/不同 parser 实例对"真歧义"输入（如"普陀棋院"——
+// 上海/普陀区 vs 浙江/舟山/普陀区）输出不同结果。v0.6.0 在 loader 里按 code
+// 升序排序后稳定。
+func TestStableAcrossInstances(t *testing.T) {
+	inputs := []string{
+		"普陀棋院",       // 真歧义：仅"普陀"无其他线索
+		"广东省深圳市南山区科技园",
+		"上海市浦东新区",
+		"沈阳市朝阳区某地",
+	}
+
+	const N = 30 // 30 个独立 parser 实例
+	parsers := make([]*CityParser, N)
+	for i := 0; i < N; i++ {
+		parsers[i] = NewCityParser()
+	}
+
+	for _, in := range inputs {
+		want, err := parsers[0].Parse(in)
+		if err != nil {
+			t.Fatalf("Parse(%q) error: %v", in, err)
+		}
+		for i := 1; i < N; i++ {
+			got, err := parsers[i].Parse(in)
+			if err != nil {
+				t.Fatalf("instance %d Parse(%q) error: %v", i, in, err)
+			}
+			if got.Code != want.Code ||
+				got.Province != want.Province ||
+				got.City != want.City ||
+				got.County != want.County {
+				t.Errorf("instance %d Parse(%q) drift:\n  want %+v\n  got  %+v",
+					i, in, want, got)
+			}
+		}
+	}
+}

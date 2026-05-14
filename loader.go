@@ -2,6 +2,7 @@ package cityparser
 
 import (
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -95,8 +96,18 @@ func buildAdminMapList() []AdminItem {
 
 	var adminList []AdminItem
 
+	// 三层 map 的遍历顺序在 Go 中是随机的，会导致 adminList 切片顺序在每次
+	// 进程启动时都不同。下游 Parse 在出现真歧义（多个候选所有筛选键都相等）
+	// 时取 candidateIdxList[0]——若候选顺序不稳定，最终结果也会不稳定。
+	//
+	// 因此这里按 code 升序提取 keys，再按序遍历，保证 adminList 顺序确定。
+	provCodes := sortedKeys(provinces)
+	cityCodes := sortedKeys(cities)
+	distCodes := sortedKeys(districts)
+
 	// 1. 添加省级条目（非直辖市）
-	for _, prov := range provinces {
+	for _, code := range provCodes {
+		prov := provinces[code]
 		provAlias := trimSuffix(prov.name)
 		if provAlias == "" {
 			provAlias = prov.name
@@ -112,7 +123,8 @@ func buildAdminMapList() []AdminItem {
 	}
 
 	// 2. 添加市级条目
-	for _, city := range cities {
+	for _, code := range cityCodes {
+		city := cities[code]
 		provCode := city.code[:2] + "0000"
 		prov, ok := provinces[provCode]
 		if !ok {
@@ -136,7 +148,8 @@ func buildAdminMapList() []AdminItem {
 	}
 
 	// 3. 添加区/县级条目
-	for _, dist := range districts {
+	for _, code := range distCodes {
+		dist := districts[code]
 		cityCode := dist.code[:4] + "00"
 		provCode := dist.code[:2] + "0000"
 
@@ -182,6 +195,17 @@ func buildAdminMapList() []AdminItem {
 	}
 
 	return adminList
+}
+
+// sortedKeys 返回 codeNode map 的 key 按字典序升序切片。
+// 用于消除 map 遍历的随机性，让上层切片顺序稳定。
+func sortedKeys(m map[string]codeNode) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // provinceCode 从 6 位代码提取省级代码
